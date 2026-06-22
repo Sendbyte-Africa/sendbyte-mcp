@@ -1,0 +1,50 @@
+{
+  "name": "@sendbyte/mcp",
+  "version": "0.1.0",
+  "description": "SendByte MCP server: let AI agents send email and manage sending domains, templates, and deliverability through SendByte.",
+  "license": "MIT",
+  "homepage": "https://sendbyte.africa",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sendbyte-Africa/sendbyte-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Sendbyte-Africa/sendbyte-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "email",
+    "transactional",
+    "sendbyte",
+    "claude",
+    "ai-agent"
+  ],
+  "type": "module",
+  "bin": {
+    "sendbyte-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.19.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
