@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "bin": {
-    "sendbyte-mcp": "./dist/index.js"
+    "sendbyte-mcp": "dist/index.js"
   },
   "files": [
     "dist",
