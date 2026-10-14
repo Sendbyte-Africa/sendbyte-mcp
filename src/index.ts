@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const server = new McpServer({ name: 'sendbyte', version: '0.1.0' });
+  const server = new McpServer({ name: 'sendbyte', version: '0.2.0' });
   registerTools(server, client);
 
   const transport = new StdioServerTransport();

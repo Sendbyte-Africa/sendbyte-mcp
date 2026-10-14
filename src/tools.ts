@@ -46,6 +46,7 @@ const EMAIL_STATUS = z.enum([
   'bounced',
   'complained',
   'suppressed',
+  'failed',
 ]);
 
 const addressList = z.union([z.string(), z.array(z.string())]);
@@ -71,7 +72,7 @@ export function registerTools(server: McpServer, client: SendByteClient): void {
       template_id: z
         .string()
         .optional()
-        .describe('Send a saved template instead of inline html/text.'),
+        .describe('Send a saved template (by its id or name) instead of inline html/text.'),
       variables: z
         .record(z.unknown())
         .optional()
@@ -110,6 +111,154 @@ export function registerTools(server: McpServer, client: SendByteClient): void {
     async ({ limit, after, status }) =>
       run(() =>
         client.request('GET', `/v1/emails${SendByteClient.query({ limit, after, status })}`)
+      )
+  );
+
+  /* ----------------------------- Receiving ------------------------------ */
+
+  server.tool(
+    'get_receiving_status',
+    'Show whether receiving is on for the project, its test address, and which domains receive mail (with each MX record and status). Received emails count toward the monthly quota; spam and virus mail never count.',
+    {},
+    async () => run(() => client.request('GET', '/v1/receiving'))
+  );
+
+  server.tool(
+    'list_received_emails',
+    'List emails the project has received, newest first, with cursor pagination. Each item has the sender, the address it was sent to, subject, status and check results. Use get_received_email for the body.',
+    {
+      status: z
+        .string()
+        .optional()
+        .describe('Filter: all, spam, received, delivered, forwarded, dropped, held or blocked. Comma-separate several.'),
+      search: z.string().optional().describe('Match against sender, subject or recipient address.'),
+      domain_id: z.string().optional().describe('Only email received on this domain.'),
+      days: z.number().int().min(1).max(90).optional().describe('How far back to look (1-90, default 30).'),
+      limit: z.number().int().min(1).max(100).optional().describe('Max results (1-100).'),
+      before: z.string().optional().describe('The next_cursor from a previous page.'),
+    },
+    async (args) => run(() => client.request('GET', `/v1/received${SendByteClient.query(args)}`))
+  );
+
+  server.tool(
+    'get_received_email',
+    'Fetch one received email with its full content: text, html, the reply without quoted history (stripped_text), headers, attachments with download links, spam/virus/SPF/DKIM/DMARC results, the sent email it replies to, and the conversation.',
+    { id: z.string().describe('The received email id.') },
+    async ({ id }) => run(() => client.request('GET', `/v1/received/${encodeURIComponent(id)}`))
+  );
+
+  server.tool(
+    'reply_to_received_email',
+    'Reply to a received email in the same thread. Threading headers and the Re: subject are set automatically. The reply is a normal send and counts toward the quota.',
+    {
+      id: z.string().describe('The received email id.'),
+      text: z.string().optional().describe('Plain-text reply. Provide text and/or html.'),
+      html: z.string().optional().describe('HTML reply.'),
+      from: z
+        .string()
+        .optional()
+        .describe('Sender on a verified domain. Defaults to the address the email was sent to, on its domain.'),
+      reply_all: z.boolean().optional().describe('Also copy everyone else on the original email.'),
+    },
+    async ({ id, ...body }) => {
+      if (!body.text && !body.html) {
+        return fail(new SendByteError('validation_error', 'Provide text or html for the reply.', 0));
+      }
+      return run(() => client.request('POST', `/v1/received/${encodeURIComponent(id)}/reply`, body));
+    }
+  );
+
+  /* ---------------------------- Marketing ------------------------------- */
+
+  server.tool(
+    'list_brands',
+    'List the marketing brands on the account. A brand holds lists, campaigns and reports, and carries the public name and logo subscribers see.',
+    {},
+    async () => run(() => client.request('GET', '/v1/brands'))
+  );
+
+  server.tool(
+    'list_subscriber_lists',
+    'List the subscriber lists inside a brand, with how many people are subscribed, unconfirmed, unsubscribed, bounced or marked the mail as spam.',
+    { brand_id: z.string().describe('The brand id from list_brands.') },
+    async ({ brand_id }) =>
+      run(() => client.request('GET', `/v1/brands/${encodeURIComponent(brand_id)}/lists`))
+  );
+
+  server.tool(
+    'list_subscribers',
+    'List the people on a subscriber list. Searches email, name and any custom field value. Use this to check whether somebody is on a list and what their status is.',
+    {
+      brand_id: z.string().describe('The brand id.'),
+      list_id: z.string().describe('The list id from list_subscriber_lists.'),
+      q: z.string().optional().describe('Search email, name or a custom field value.'),
+      status: z
+        .enum(['subscribed', 'unconfirmed', 'unsubscribed', 'bounced', 'complained'])
+        .optional()
+        .describe('Filter by status on this list.'),
+      limit: z.number().int().min(1).max(100).optional().describe('Max results (1-100).'),
+    },
+    async ({ brand_id, list_id, q, status, limit }) =>
+      run(() =>
+        client.request(
+          'GET',
+          `/v1/brands/${encodeURIComponent(brand_id)}/lists/${encodeURIComponent(list_id)}/subscribers${SendByteClient.query({ q, status, limit })}`
+        )
+      )
+  );
+
+  server.tool(
+    'add_subscriber',
+    'Add somebody to a subscriber list. On a double opt-in list they are added as unconfirmed and are never emailed until they confirm. Anyone who previously unsubscribed or bounced is deliberately left alone, and the result says so in skipped_reason rather than failing.',
+    {
+      brand_id: z.string().describe('The brand id.'),
+      list_id: z.string().describe('The list id.'),
+      email: z.string().describe('The subscriber email address.'),
+      name: z.string().optional().describe('Their name, used for personalization.'),
+      attributes: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Custom field values, keyed by the field tag (for example city).'),
+    },
+    async ({ brand_id, list_id, email, name, attributes }) =>
+      run(() =>
+        client.request(
+          'POST',
+          `/v1/brands/${encodeURIComponent(brand_id)}/lists/${encodeURIComponent(list_id)}/subscribers`,
+          { email, ...(name ? { name } : {}), ...(attributes ? { attributes } : {}) }
+        )
+      )
+  );
+
+  server.tool(
+    'list_campaigns',
+    'List a brand\'s campaigns with their status and headline counts. A campaign that reached nobody has status "failed", never "sent".',
+    {
+      brand_id: z.string().describe('The brand id.'),
+      limit: z.number().int().min(1).max(100).optional().describe('Max results (1-100).'),
+    },
+    async ({ brand_id, limit }) =>
+      run(() =>
+        client.request(
+          'GET',
+          `/v1/brands/${encodeURIComponent(brand_id)}/campaigns${SendByteClient.query({ limit })}`
+        )
+      )
+  );
+
+  server.tool(
+    'get_campaign_report',
+    'Fetch the grounded report for one campaign: which links were clicked and by how many people, where it was opened by country, and the most recent opens, bounces, spam reports and unsubscribes.',
+    {
+      brand_id: z.string().describe('The brand id.'),
+      campaign_id: z.string().describe('The campaign id from list_campaigns.'),
+    },
+    async ({ brand_id, campaign_id }) =>
+      run(() =>
+        client.request(
+          'GET',
+          `/v1/brands/${encodeURIComponent(brand_id)}/campaigns/${encodeURIComponent(campaign_id)}/report`
+        )
       )
   );
 

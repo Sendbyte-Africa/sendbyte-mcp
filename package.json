@@ -1,6 +1,6 @@
 {
   "name": "@sendbyte/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "SendByte MCP server: let AI agents send email and manage sending domains, templates, and deliverability through SendByte.",
   "license": "MIT",
   "homepage": "https://sendbyte.africa",

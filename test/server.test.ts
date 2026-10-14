@@ -95,6 +95,7 @@ describe('MCP server wiring', () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        // Transactional
         'get_analytics',
         'get_domain',
         'get_email',
@@ -106,8 +107,44 @@ describe('MCP server wiring', () => {
         'scan_content',
         'send_email',
         'verify_domain',
+        // Marketing
+        'add_subscriber',
+        'get_campaign_report',
+        'list_brands',
+        'list_campaigns',
+        'list_subscriber_lists',
+        'list_subscribers',
+        // Receiving
+        'get_receiving_status',
+        'get_received_email',
+        'list_received_emails',
+        'reply_to_received_email',
       ].sort()
     );
+  });
+
+  it('reply_to_received_email posts the reply and refuses an empty one', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: 'em_2', status: 'queued', thread_id: '<t@x>' }, 202));
+    const client = await connectedClient(fetchMock as unknown as typeof fetch);
+    const empty = await client.callTool({ name: 'reply_to_received_email', arguments: { id: 'rcv_1' } });
+    expect(empty.isError).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await client.callTool({ name: 'reply_to_received_email', arguments: { id: 'rcv_1', text: 'On its way.' } });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/v1\/received\/rcv_1\/reply$/);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ text: 'On its way.' });
+  });
+
+  it('list_received_emails passes filters as query parameters', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ data: [], has_more: false, next_cursor: null }));
+    const client = await connectedClient(fetchMock as unknown as typeof fetch);
+    await client.callTool({ name: 'list_received_emails', arguments: { status: 'spam,held', search: 'invoice', limit: 5 } });
+    const url = new URL((fetchMock.mock.calls[0] as unknown as [string])[0]);
+    expect(url.pathname).toBe('/v1/received');
+    expect(url.searchParams.get('status')).toBe('spam,held');
+    expect(url.searchParams.get('search')).toBe('invoice');
+    expect(url.searchParams.get('limit')).toBe('5');
   });
 
   it('send_email forwards to the API and returns the result', async () => {
